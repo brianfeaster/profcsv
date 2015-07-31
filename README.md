@@ -2,8 +2,6 @@
 
 # How to build:
 
-* git clone https://github.com/brianfeaster/profcsv.git
-* cd profcsv
-* export GOPATH=$PWD  
-* go build main
-* ./main
+* cd $GOPATH
+* go get github.com/brianfeaster/profcsv/main
+* ./bin/main
