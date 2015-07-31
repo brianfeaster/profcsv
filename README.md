@@ -2,6 +2,8 @@
 
 # How to build:
 
-* cd $GOPATH
-* go get github.com/brianfeaster/profcsv/main
-* ./bin/main
+```
+cd $GOPATH
+go get github.com/brianfeaster/profcsv/main
+./bin/main
+```
