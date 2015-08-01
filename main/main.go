@@ -1,45 +1,75 @@
 package main
 
 import (
-	"fmt"
-	"errors"
+	"bytes"
 	"encoding/csv"
+	"fmt"
+	"bufio"
+	"os"
+	"time"
 )
 
+const FieldMax int = 500
 
-type SimpleFile struct {
-  data string;
-     i int;
-}
-
-func SimpleFileNew (d string) *SimpleFile {
-	return &SimpleFile{data:d, i:0}
-}
-
-func (this *SimpleFile) Read(p []byte) (n int, err error) {
-	if len(this.data) <= this.i {
-		n = 0;
-		err = errors.New("No more data!")
-	} else {
-		p[0] = this.data[this.i]
-		this.i++
-		n = 1
-		err = nil
-	}
-	return
-}
-
-func main () {
+func countFields (reader *csv.Reader, header string) {
+	var f int
+	var counts [FieldMax]int
 	var strs []string
-	var err error = nil;
-	r := csv.NewReader(SimpleFileNew(
-		"ab,cd,12\n" +
-		"AB,CD,12,34\n" +
-		"x,y,z\n"))
+	var err error
+	reader.FieldsPerRecord = -1
+
+	var t0 time.Time = time.Now()
+
+	err = nil
 	for {
-		strs, err = r.Read()
-		fmt.Printf("Output:%v\n", strs)
-		if err!=nil { break }
+		strs, err = reader.Read()
+		//fmt.Printf("Output:%v:%d\n", strs, len(strs))
+		f = len(strs)
+		if f < FieldMax {
+			counts[f]++
+		} else {
+			fmt.Println("ERROR: more than", FieldMax, "fields")
+		}
+		if err != nil { break }
 	}
-	fmt.Print(err)
+	//fmt.Print(err)
+	fmt.Print(header)
+	for f=0; f<FieldMax; f++ {
+		if 0 < counts[f] { fmt.Println(f, counts[f]) }
+	}
+
+	var t1 time.Time = time.Now()
+
+	fmt.Printf("The call took %f seconds.\n\n", t1.Sub(t0).Seconds())
+}
+
+func main() {
+	var reader *csv.Reader
+	var err error
+
+	// read string   /////////////////
+	reader = csv.NewReader(bytes.NewReader([]byte("ab,cd,12\nAB,CD,12,34\nx,y,z\n")))
+	countFields(reader, "static string")
+
+	// read csv file /////////////////
+
+	var f *os.File
+	var fileReader *bufio.Reader
+
+	f, err = os.Open("ss10pusa.csv")
+	//f, err = os.Open("fun.csv")
+	if err != nil {
+		fmt.Println("Can't open csv file\n")
+		return
+	}
+
+	fileReader = bufio.NewReader(f)
+	if fileReader == nil {
+		fmt.Println("Can't create reader out of file")
+		return
+	}
+
+	reader = csv.NewReader(fileReader)
+	countFields(reader, "file")
+
 }
