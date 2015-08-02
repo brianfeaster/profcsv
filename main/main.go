@@ -23,7 +23,6 @@ func countFields (reader *csv.Reader, header string) {
 	err = nil
 	for {
 		strs, err = reader.Read()
-		//fmt.Printf("Output:%v:%d\n", strs, len(strs))
 		f = len(strs)
 		if f < FieldMax {
 			counts[f]++
@@ -32,7 +31,6 @@ func countFields (reader *csv.Reader, header string) {
 		}
 		if err != nil { break }
 	}
-	//fmt.Print(err)
 	fmt.Print(header)
 	for f=0; f<FieldMax; f++ {
 		if 0 < counts[f] { fmt.Println(f, counts[f]) }
@@ -43,21 +41,26 @@ func countFields (reader *csv.Reader, header string) {
 	fmt.Printf("The call took %f seconds.\n\n", t1.Sub(t0).Seconds())
 }
 
-func main() {
-	var reader *csv.Reader
-	var err error
 
-	// read string   /////////////////
+/* Exercises the countFields function on a simple string derived CSV.
+*/
+func testReadString () {
+	var reader *csv.Reader
+
 	reader = csv.NewReader(bytes.NewReader([]byte("ab,cd,12\nAB,CD,12,34\nx,y,z\n")))
 	countFields(reader, "static string")
+}
 
-	// read csv file /////////////////
 
+/* Exercises the countFields function on a local CSV file.
+*/
+func testReadFile () {
+	var reader *csv.Reader
+	var err error
 	var f *os.File
 	var fileReader *bufio.Reader
 
 	f, err = os.Open("ss10pusa.csv")
-	//f, err = os.Open("fun.csv")
 	if err != nil {
 		fmt.Println("Can't open csv file\n")
 		return
@@ -71,5 +74,10 @@ func main() {
 
 	reader = csv.NewReader(fileReader)
 	countFields(reader, "file")
+}
 
+
+func main() {
+	testReadString()
+	testReadFile()
 }
