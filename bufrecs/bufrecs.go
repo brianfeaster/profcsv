@@ -62,7 +62,7 @@ func (this *BufRecs) readBytesLoop() {
 		n, err := this.reader.Read(this.buff)
 
 		if n <= 0 {
-			fmt.Println("WARNING: readyBytesLoop got nothing.  Expected synchronous behavior.")
+			fmt.Println("WARNING: readyBytesLoop got nothing.  Expected synchronous behavior.  err=", err)
 		}
 
 		for 0 < n { // Over all bytes...
