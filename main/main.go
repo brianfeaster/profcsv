@@ -69,12 +69,13 @@ func fileSize(filename string) (size int64, err error) {
 	if err != nil {
 		return
 	}
+	defer f.Close()
+
 	fs, err := f.Stat()
 	if err != nil {
 		return
 	}
 	size = fs.Size()
-	f.Close()
 	return
 }
 
@@ -115,11 +116,10 @@ func countFields(reader *csv.Reader, header string) {
 	fmt.Println("Done.", time.Since(now))
 }
 
-/* Exercises the countFields function on a simple string derived CSV.
+/* Tabulate the field counts of a CSV in string form.
  */
 func countCSVFieldsFromString(str []byte, desc string) {
-	var reader *csv.Reader = csv.NewReader(bytes.NewReader(str))
-	countFields(reader, desc)
+	countFields(csv.NewReader(bytes.NewReader(str)), desc)
 }
 
 /* Exercises the countFields function on a chunked ReadCloser
@@ -251,7 +251,7 @@ func main() {
 	var threadCount int64 = int64(runtime.NumCPU())
 	runtime.GOMAXPROCS(int(threadCount))
 
-	//countCSVFieldsFromString([]byte("ab,cd,12\nAB,CD,12,34\nx,y,z\n", "static string"))
+	//countCSVFieldsFromString([]byte("ab,cd,12\nAB,CD,12,34\nx,y,z\n"), "static string")
 	//testFileSplit(2, "ss10pusb.csv")
 	testURISplit(URIs[3], threadCount*2)
 
