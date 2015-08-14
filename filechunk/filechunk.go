@@ -6,32 +6,32 @@ import (
 )
 
 type FileChunk struct {
-	file  *os.File
-	count int64
+	file      *os.File
+	CountLeft int64
 }
 
-func NewFileChunk(file *os.File, offset int64, count int64) *FileChunk {
-	o, err := file.Seek(offset, 0)
-	if o != offset {
+func NewFileChunk(file *os.File, from int64, to int64) *FileChunk {
+	o, err := file.Seek(from, 0)
+	if o != from {
 		panic("Can't seek")
 	}
 	if nil != err {
 		panic(err)
 	}
-	return &FileChunk{file: file, count: count}
+	return &FileChunk{file: file, CountLeft: to - from}
 }
 
 func (this *FileChunk) Read(p []byte) (n int, err error) {
 	// When no more bytes shold be read, return nothing and an error.
-	if 0 == this.count {
-		return 0, errors.New("End of chunk.")
+	if this.CountLeft <= 0 {
+		return 0, errors.New("EOChunk")
 	}
 	// Make sure count bytes are ever read
-	if this.count < int64(len(p)) {
-		p = p[:this.count]
+	if this.CountLeft < int64(len(p)) {
+		p = p[:this.CountLeft]
 	}
 	n, err = this.file.Read(p)
-	this.count = this.count - int64(n)
+	this.CountLeft = this.CountLeft - int64(n)
 	return
 }
 

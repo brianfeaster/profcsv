@@ -2,7 +2,6 @@ package bufrecs
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 )
 
@@ -11,24 +10,28 @@ import (
 */
 
 type BufRecs struct {
+	id           int
+	Count        int64
 	reader       io.Reader // where bytes will come from
 	finalErr     error
 	delim        byte          // The delimeter.  Default is ','
 	buff         []byte        // Byte array where all new incoming bytes are writen to and then sliced up.  After filling and sliced, a new stage is allocated.
 	recStage     [][]byte      // The bytes stage is sliced and queued here until a delimeter is scanned.
-	recQueue     chan [][]byte // Channel of records (arrays of byte slices)
+	recQueue     chan [][]byte // Channel of records (arrays of byte slices).  Final record followed by nil.  When no more records, this is set to nil
 	FinalPartial [][]byte
 	recOut       [][]byte // Dequeued records that are bled out to Read requests
 	err          error
 }
 
-const ByteStageSize int = 8192
-const QueueMax int = 1024
+const ByteStageSize int = 65536
+const QueueMax int = 256
 
 // Initializiation //
 
-func NewBufRecs(r io.Reader) *BufRecs {
+func NewBufRecs(r io.Reader, id int) *BufRecs {
 	this := &BufRecs{
+		id:           id,
+		Count:        0,
 		reader:       r,
 		finalErr:     nil,
 		delim:        '\n',
@@ -60,10 +63,7 @@ func (this *BufRecs) readBytesLoop() {
 	for {
 		// Snarf some bytes into our local buffer (which is shifted until full)
 		n, err := this.reader.Read(this.buff)
-
-		if n <= 0 {
-			fmt.Println("WARNING: readyBytesLoop got nothing.  Expected synchronous behavior.  err=", err)
-		}
+		this.Count += int64(n)
 
 		for 0 < n { // Over all bytes...
 			di := bytes.IndexByte(this.buff[:n], this.delim) // Find a delimiter
@@ -83,18 +83,18 @@ func (this *BufRecs) readBytesLoop() {
 			n = n - (di + 1)             // Reduce number of unscanned bytes
 		}
 
-		// If the buffer has been used up, create a new one
-		if 0 == len(this.buff) {
-			this.buff = buffMake()
-		}
-
 		if err != nil {
 			if 0 < len(this.recStage) {
-				this.FinalPartial = this.recStage
+				this.FinalPartial = this.recStage // The last record is not returned but instead kept track of
 			}
 			this.finalErr = err
 			break
 		}
+
+		if 0 == len(this.buff) { // If the buffer has been used up, create a new one
+			this.buff = buffMake()
+		}
+
 	} // for
 	this.recQueue <- nil // Add a sentinel value to the queue
 }
@@ -117,18 +117,18 @@ func (this *BufRecs) Get() []byte {
 
 func (this *BufRecs) Read(p []byte) (n int, err error) {
 
-	if nil == this.recQueue {
+	if nil == this.recQueue { // When recQueue is nil, there are no more records.
 		err = this.finalErr
 		return
 	}
 
 	for {
-		if nil == this.recOut || 0 == len(this.recOut) {
-			this.recOut = <-this.recQueue
-			if nil == this.recOut {
+		if nil == this.recOut || 0 == len(this.recOut) { // If recOut hasn't been used yet or it has been read completely...
+			this.recOut = <-this.recQueue // Consider a new record from the channel
+			if nil == this.recOut {       // Final sentinel has been read.  There are no more records.
 				this.recQueue = nil
 				err = this.finalErr
-				return
+				break
 			}
 		}
 
@@ -140,9 +140,9 @@ func (this *BufRecs) Read(p []byte) (n int, err error) {
 		} else {
 			this.recOut[0] = this.recOut[0][s:]
 		}
-		if 0 == s || n == len(p) {
+		if 0 == s || n == len(p) { // If nothing copied or p full, return
 			break
-		} // If nothing copied or p full, return
+		}
 	}
 
 	return
