@@ -102,7 +102,11 @@ func StatusRender() {
 		fmt.Printf("\nBufRecs Status::")
 		for id, br := range BufRecs {
 			if nil != br {
-				fmt.Printf(" %6.2f%%", 100.0*(float64(br.Count)/float64(ChunkLength[id])))
+				if br.Count == ChunkLength[id] {
+					fmt.Printf("   DONE ")
+				} else {
+					fmt.Printf(" %6.2f%%", 100.0*(float64(br.Count)/float64(ChunkLength[id])))
+				}
 			} else {
 				fmt.Printf(" [ N/A ]")
 			}
