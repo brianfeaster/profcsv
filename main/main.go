@@ -86,32 +86,41 @@ func fileSize(filename string) (size int64, err error) {
 var FileChunks []*filechunk.FileChunk
 var BufRecs []*bufrecs.BufRecs
 var ChunkLength []int64
+var StatusRenderStop chan int
 
 func statusStart(threadCount int) {
 	FileChunks = make([]*filechunk.FileChunk, threadCount)
 	BufRecs = make([]*bufrecs.BufRecs, threadCount)
 	ChunkLength = make([]int64, threadCount)
+	StatusRenderStop = make(chan int)
 	go StatusRender()
 }
 
 func StatusRender() {
 	for {
-		fmt.Printf("\x1b7\x1b[0H::BufRecs Capacity")
+		time.Sleep(2000 * time.Millisecond)
+		fmt.Printf("\nBufRecs Status::")
 		for id, br := range BufRecs {
 			if nil != br {
-				fmt.Printf(" [%3.2f]", 100.0*(float64(br.Count)/float64(ChunkLength[id])))
+				fmt.Printf(" %6.2f%%", 100.0*(float64(br.Count)/float64(ChunkLength[id])))
+			} else {
+				fmt.Printf(" [ N/A ]")
 			}
 		}
-		fmt.Printf("\n\x1b8")
-		time.Sleep(1000 * time.Millisecond)
+		select {
+		case <-StatusRenderStop:
+			break
+		default:
+		}
 	}
+	StatusRenderStop <- 1 // Report "Yes, I'm done."
 }
 
 /* Histogram helpers
  */
 func dumpHistogram(histogram []int64) {
 	first := true
-	fmt.Print("{")
+	fmt.Print("\nHistogram {")
 
 	if 0 == len(histogram) {
 		fmt.Printf("empty")
@@ -164,7 +173,7 @@ func countFields(csvReader *csv.Reader, histogram []int64) {
 				histogram[f]++
 			} // There's no such thing as a 0 length field record.
 		} else {
-			fmt.Println("WARNING:", histogramLen, "<", f, "histogram length.")
+			fmt.Print("\nWARNING:", histogramLen, "<", f, "histogram length.")
 		}
 	}
 	return
@@ -181,8 +190,8 @@ func countCSVFieldsFromString(str []byte, histogram []int64) {
 func countCSVFieldsFromChunkedReaderWorker(wg *sync.WaitGroup, threadId int, r io.ReadCloser, partials [][]byte, histogram []int64) {
 	now := time.Now()
 	bufr := bufrecs.NewBufRecs(r, threadId) // Create the buffered record reader
-	// Keep track of the bufrec for status updates
-	BufRecs[threadId] = bufr
+
+	BufRecs[threadId] = bufr // Keep track of the bufrec for status updates
 
 	partials[threadId*2] = bufr.Get() // Keep track of the first record which is assumed to be partial (the rest belonging to the previous thread's chunk.
 
@@ -192,13 +201,13 @@ func countCSVFieldsFromChunkedReaderWorker(wg *sync.WaitGroup, threadId int, r i
 
 	partials[threadId*2+1] = recordFlatten(bufr.FinalPartial) // Keep track of the last record, which is assumed to be partisl (the rest belonging to the next thread's chunk).
 
-	fmt.Printf("\tWorker %d done [%s]\n", threadId, time.Since(now))
+	fmt.Printf("\n%d:: done [%s].", threadId, time.Since(now))
 	wg.Done()
 }
 
 /* Count the fields per record from a CSV via a local file
  */
-func performFileSplitAndCount(threadCount int64, filename string) {
+func performFileSplitAndCount(threadCount int64, filename string) (histogram []int64) {
 	var err error
 	var from int64 = 0
 	var to int64
@@ -210,8 +219,6 @@ func performFileSplitAndCount(threadCount int64, filename string) {
 
 	lengths := createSplitLengths(fileSize, threadCount)
 
-	fmt.Println("FileSize:", fileSize, "\nThread count:", len(lengths))
-
 	wg := sync.WaitGroup{}
 	partials := make([][]byte, threadCount*2) // Will contain each thread's pre and post partial records.
 	histograms := make([][]int64, threadCount)
@@ -221,7 +228,7 @@ func performFileSplitAndCount(threadCount int64, filename string) {
 		wg.Add(1)
 		to = from + chunkLength
 		f, _ := os.Open(filename) // f is closed in filechunk which is is closed in countCSVFieldsFromChunkedReaderWorker
-		fmt.Println("Chunking", from, to)
+		fmt.Printf("\nChunk %2d  Range [%10d %10d)  Size %d", idx, from, to, to-from)
 		fileChunk := filechunk.NewFileChunk(f, from, to)
 		FileChunks[idx] = fileChunk
 		histogram := make([]int64, HistogramSize)
@@ -230,22 +237,26 @@ func performFileSplitAndCount(threadCount int64, filename string) {
 		from = to
 	}
 
+	if to != fileSize {
+		fmt.Printf("\nWARNING:: fileSize %d != %d last chunk range.", to, fileSize)
+	}
+
 	wg.Wait()
 
 	countCSVFieldsFromString(recordFlatten(partials), histograms[0]) // Count the inter-thread partials
 	histogramsMerge(histograms)
-	dumpHistogram(histograms[0])
+	return histograms[0]
 }
 
 /* Count the fields per record from a CSV via HTTP
  */
-func performURISplitAndCount(uri string, threadCount int64) {
+func performURISplitAndCount(uri string, threadCount int64) (histogram []int64) {
 	var e error
 	var urlLength, to, from int64
 
 	urlLength = urlContentLength(uri)
 
-	fmt.Printf("URL: %s\nContent-length: [%d %0.3f Gb]\n", uri, urlLength, float64(urlLength)/(1024.0*1024.0*1024.0))
+	fmt.Printf("\nURL: %s\nContent-length: [%d %0.3f Gb]", uri, urlLength, float64(urlLength)/(1024.0*1024.0*1024.0))
 
 	if urlLength < 0 {
 		panic("Content length < 0")
@@ -280,10 +291,10 @@ func performURISplitAndCount(uri string, threadCount int64) {
 		}
 
 		serversays := strings.Split(strings.Split(resp.Header["Content-Range"][0], "/")[0], "-")
-		fmt.Printf("%d:: serversays:%s\n", idx, serversays)
+		fmt.Printf("\n%d:: serversays:%s", idx, serversays)
 		serversays[0] = strings.TrimPrefix(serversays[0], "bytes ")
 		if len(serversays) == 2 && serversays[0] == serversays[1] {
-			fmt.Printf("%d:: server reports empty\n", idx)
+			fmt.Printf("\n%d:: server reports empty\n", idx)
 			return
 		}
 
@@ -294,12 +305,12 @@ func performURISplitAndCount(uri string, threadCount int64) {
 		from = to
 	}
 
-	fmt.Println("Waiting on", threadCount, "threads...")
+	fmt.Print("\nWaiting on ", threadCount, " threads...")
 	wg.Wait()
 
 	countCSVFieldsFromString(recordFlatten(partials), histograms[0]) // Count the inter-thread partials
 	histogramsMerge(histograms)
-	dumpHistogram(histograms[0])
+	return histograms[0]
 }
 
 // Main ////////
@@ -315,13 +326,18 @@ func main() {
 	var threadCount int64 = int64(runtime.NumCPU())
 	runtime.GOMAXPROCS(int(threadCount))
 
-	statusStart(int(threadCount))
+	statusStart(int(threadCount)) // Enable the status update thread which dumps periodic info about the workers.
 
-	//countCSVFieldsFromString([]byte("ab,cd,12\nAB,CD,12,34\nx,y,z\n"))
-	//performFileSplitAndCount(1, "data.csv")
-	//performFileSplitAndCount(2, "dat")
-	performFileSplitAndCount(threadCount, "ss10pusb.csv")
-	//performURISplitAndCount(URIs[3], threadCount)
+	//// Choose a test to perform
 
-	fmt.Printf("Done [%s].\n", time.Since(now))
+	//histogram := make([]int64, HistogramSize); countCSVFieldsFromString([]byte("ab,cd,12\nAB,CD,12,34\nx,y,z\n"), histogram)
+	//histogram := performFileSplitAndCount(threadCount, "data.csv")
+	//histogram := performFileSplitAndCount(threadCount, "dat")
+	//histogram := performFileSplitAndCount(threadCount, "ss10pusb.csv")
+	histogram := performURISplitAndCount(URIs[3], threadCount)
+
+	StatusRenderStop <- 2 // Shutdown the status update thread.
+
+	dumpHistogram(histogram)
+	fmt.Printf("\nDone [%s].\n", time.Since(now))
 }

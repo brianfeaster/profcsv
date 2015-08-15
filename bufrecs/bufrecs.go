@@ -57,22 +57,25 @@ func buffMake() (buff []byte) {
 
 // Methods Private //
 
-/* Always read bytes from the Reader into rope
- */
+/* Always read bytes from the Reader into a rope.  A record is a rope consisting of "strings" that end with a delimieter (newline by default).
+The last incomplete record, if any, will be kept track of separate from the usual queue.
+*/
 func (this *BufRecs) readBytesLoop() {
 	for {
 		// Snarf some bytes into our local buffer (which is shifted until full)
 		n, err := this.reader.Read(this.buff)
 		this.Count += int64(n)
 
-		for 0 < n { // Over all bytes...
+		for 0 < n { // Over all bytes look for a delimeter...
 			di := bytes.IndexByte(this.buff[:n], this.delim) // Find a delimiter
-			if di < 0 {                                      // No delimeter [.....n   ]...
-				this.recStage = append(this.recStage, this.buff[:n]) // Move slice to stage
+			if di < 0 {                                      // No delimeter found so just add the bytes to the rope [.....n   ]...
+				this.recStage = append(this.recStage, this.buff[:n]) // Append slice to the stage (or rope as they say apparently)
 				this.buff = this.buff[n:]                            // Shrink buffer to remaining empty bytes
 				break
 			}
-			// A delimeter found [..d...n   ]
+
+			// A delimeter found [..d...n   ] so add this complete record to the outgoing queue and continue scanning
+
 			this.recStage = append(this.recStage, this.buff[:di+1]) // Move slice to stage
 
 			// Add the staged record to the channel for human consumption
@@ -85,7 +88,7 @@ func (this *BufRecs) readBytesLoop() {
 
 		if err != nil {
 			if 0 < len(this.recStage) {
-				this.FinalPartial = this.recStage // The last record is not returned but instead kept track of
+				this.FinalPartial = this.recStage // The last record is not returned but instead kept track of.  It might be empty
 			}
 			this.finalErr = err
 			break
@@ -96,7 +99,9 @@ func (this *BufRecs) readBytesLoop() {
 		}
 
 	} // for
-	this.recQueue <- nil // Add a sentinel value to the queue
+
+	// Add sentinel values to queue to tell the reader(s) to close itself.
+	this.recQueue <- nil
 }
 
 // Methods Public //
@@ -105,9 +110,11 @@ func (this *BufRecs) readBytesLoop() {
  */
 func (this *BufRecs) Get() []byte {
 	rec := <-this.recQueue
-	if nil == rec {
+	if nil == rec { // Close this reader.
+		this.recQueue = nil
 		return nil
 	}
+	// Collapse rope into a string
 	a := rec[0]
 	for _, b := range rec[1:] {
 		a = append(a, b...)
@@ -125,7 +132,7 @@ func (this *BufRecs) Read(p []byte) (n int, err error) {
 	for {
 		if nil == this.recOut || 0 == len(this.recOut) { // If recOut hasn't been used yet or it has been read completely...
 			this.recOut = <-this.recQueue // Consider a new record from the channel
-			if nil == this.recOut {       // Final sentinel has been read.  There are no more records.
+			if nil == this.recOut {       // Final sentinel has been read.  There are no more records. Close down this reader.
 				this.recQueue = nil
 				err = this.finalErr
 				break
